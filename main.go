@@ -20,6 +20,11 @@ type dataWeb struct {
 	city     string
 	location string
 	weather  string
+	// Se agregan estos dos campos para saber cuando se crea
+	// y cuando se termina de llenar los datos.
+	tcreate time.Time // cuando se crea el dato
+	tdone   time.Time // cuando finaliza la creacion
+
 }
 
 type dataBad struct {
@@ -30,9 +35,6 @@ type dataBad struct {
 //--MAIN---------------------------------------------------------------------------
 
 func main() {
-
-	// Inicia la medicion del tiempo de ejecucion
-	now := time.Now()
 
 	// 1. Se leen y procesan los parametros de entrada.
 	// Se ingresan los args es un slice de strings
@@ -48,7 +50,8 @@ func main() {
 	// sean del formato ciudad,PA donde PA son las siglas del pais.
 
 	//crear una variable global que almacenará la expresión regular
-	expresionRegular := regexp.MustCompile("^[A-Z][A-Za-z]+[,]+([A-Z][A-Z])?$")
+	// Se modifica la expresion regular para que acepte tildes el el nombre
+	expresionRegular := regexp.MustCompile("^[A-Z][A-Za-záéíóú]+[,]+([A-Z][A-Z])?$")
 
 	// Estas variables contienen los arreglos con parametros buenos y malos
 	var dataCity []dataWeb // Ciudades con formato OK
@@ -58,7 +61,7 @@ func main() {
 		// range va desde 0 hasta el tamanio del arreglo
 		if expresionRegular.Match([]byte(arg)) { // Si coincide con la expresion regular es TRUE
 			// 3. Se guardan los parametros ok en un arreglos de ciudades
-			dataCity = append(dataCity, dataWeb{idx + 1, arg, "vacio", "vacio"})
+			dataCity = append(dataCity, dataWeb{idx + 1, arg, "vacio", "vacio", time.Now(), time.Now()})
 		} else {
 			// Se guardan las ciudades con formato incorrecto
 			// en un arreglo de malas ciudades
@@ -76,24 +79,32 @@ func main() {
 	// La unica respuesta que se procesa aqui es la 1
 	// las otras se hacen en  menu()
 
+	// Inicia la medicion del tiempo de ejecucion luego
+	// de que se selecciona la opcion.
+	now := time.Now()
+
 	if respuesta == 1 {
 		// En este lazo se envian una a una  las ciudades por el
 		// canal.
 		//for idx, arg := range args[1:] {
 		for i := 0; i <= len(dataCity)-1; i++ {
 			//fmt.Println("Procesando elemento [", i, "]")
-			proCitys(&dataCity[i]) // Se llama a la funcion para procesar Ciudades
+			go proCitys(&dataCity[i], i) // Se llama a la funcion para procesar Ciudades
+			time.Sleep(80 * time.Millisecond)
 		}
 	}
 
 	// Se imprimen los resultados obtenidos
 	impWeather(dataCity)
 
-	fmt.Println("\n\n FIN DEL PROGRAMA..", string(time.Since(now)))
+	fmt.Println("\n\n FIN DEL PROGRAMA..")
 	fmt.Println("\n\nTiempo transcurrido:", time.Since(now))
+
 }
 
 //--IMPWEATHER---------------------------------------------------------------------------
+//
+//  Imprime en formato los datos recuperados de la web.
 func impWeather(cityes []dataWeb) {
 
 	// Se ordena el Slice por el nombre de la ciudad.
@@ -104,9 +115,11 @@ func impWeather(cityes []dataWeb) {
 	for i := 0; i < len(cityes); i++ {
 		fmt.Println("No:", i+1)
 		fmt.Println("Ciudad: ", cityes[i].city)
+		fmt.Println("Tiempo proc.: ", cityes[i].tdone.Sub(cityes[i].tcreate))
 		fmt.Println("Info Geografica: ", cityes[i].location)
 		fmt.Println("Info Clima: ", cityes[i].weather)
-		fmt.Println("")
+
+		fmt.Println("-------------")
 
 	}
 
@@ -155,7 +168,12 @@ func menu(badCity []dataBad) int {
 
 // --PROCITYS---------------------------------------------------------------------------------------
 
-func proCitys(city *dataWeb) {
+func proCitys(city *dataWeb, i int) {
+
+	// Se guarda el momento en que se empieza a procesar.
+
+	city.tcreate = time.Now()
+	//fmt.Println(i, ": en  proCitys()")
 	// Procesa las ciudades de una en una.
 
 	//fmt.Println("Procesando en proCitys: ", city.index, " - ", city.city)
@@ -184,8 +202,9 @@ func proCitys(city *dataWeb) {
 	// Buscamos los valores para: name, country, state, lat y lon
 	// para hacer esto utilizamos expresiones regulares
 	// STATE
-	expresion := regexp.MustCompile(`\"state\":\"[a-zA-ZñÑ]*\"`)
+	expresion := regexp.MustCompile(`\"state\":\"[a-zA-ZñÑáóúíé]*\"`)
 	// En la expresion regular anterior se añade ñÑ para los nombres que las contienen
+	// Luego se agregan las vocales con tilde
 	datFound := string(expresion.Find(bytes))
 	iniCadena = strings.Index(datFound, ":")
 	strState := datFound[iniCadena+2 : len(datFound)-1]
@@ -222,6 +241,7 @@ func proCitys(city *dataWeb) {
 
 	//fmt.Println(string(bytes))
 	city.weather = paramWeather(bytes)
+	city.tdone = time.Now()
 
 }
 
