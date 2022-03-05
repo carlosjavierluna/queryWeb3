@@ -178,14 +178,14 @@ func proCitys(city *dataWeb) {
 	//  Se obtiene las posiciones donde se encuentra (,)
 
 	iniCadena := strings.Index(city.city, ",")
-
 	// Se obtienen las cadenas de la ciudad y el pais
 	strCity := city.city[:iniCadena]
 	strCountry := city.city[iniCadena+1:]
 	// Buscamos los valores para: name, country, state, lat y lon
 	// para hacer esto utilizamos expresiones regulares
 	// STATE
-	expresion := regexp.MustCompile(`\"state\":\"[a-zA-Z]*\"`)
+	expresion := regexp.MustCompile(`\"state\":\"[a-zA-ZñÑ]*\"`)
+	// En la expresion regular anterior se añade ñÑ para los nombres que las contienen
 	datFound := string(expresion.Find(bytes))
 	iniCadena = strings.Index(datFound, ":")
 	strState := datFound[iniCadena+2 : len(datFound)-1]
@@ -273,6 +273,7 @@ func paramWeather(bytes []byte) string {
 // --QUERYCITYLOCATION---------------------------------------------------------------------------------------
 
 func queryCityLocation(city string) ([]byte, error) {
+	//fmt.Println("Entrando a la funcion queryCityLocation()")
 	client := &http.Client{Timeout: 30 * time.Second}
 	// codigo nuevo
 	urlFind := fmt.Sprintf("https://api.openweathermap.org/geo/1.0/direct?q=%s&limit=5&appid=3582889a6bd6c9bd3d2867e51f420116", city)
@@ -307,6 +308,7 @@ func queryCityWeather(latCity string, lonCity string) ([]byte, error) {
 // al URL que se le de como parametro.
 
 func getWebBytes(client *http.Client, url string) ([]byte, error) {
+	//fmt.Println("Entrando a la funcion getWebBytes()")
 	// Se verifica si la solicitud se ha construido bien.
 	// Si se tiene un error en la conexion o la consulta se termina el programa
 	// y se muestra el mensaje de error generado.
@@ -318,7 +320,7 @@ func getWebBytes(client *http.Client, url string) ([]byte, error) {
 		nil,
 	)
 	if err != nil {
-		fmt.Println("Error fatal #1 en getWebBytes")
+		fmt.Println("Error fatal #1 en getWebBytes()")
 		log.Fatal(err)
 	}
 	// Ejecutar la consulta. El método Do ejecuta la soliciutd.
@@ -326,7 +328,7 @@ func getWebBytes(client *http.Client, url string) ([]byte, error) {
 	// Si se tiene un error en la conexion o la consulta se termina el programa
 	// y se muestra el mensaje de error generado.
 	if err != nil {
-		fmt.Println("Error fatal #2 en getWebBytes")
+		fmt.Println("Error fatal #2 en getWebBytes()")
 		log.Fatal(err)
 	}
 	// La siguiente funcion lee todo el "body" de la pagina web.
