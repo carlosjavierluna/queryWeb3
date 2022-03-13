@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -16,10 +17,14 @@ import (
 )
 
 type dataWeb struct {
-	index    int
-	city     string
-	location string
-	weather  string
+	index   int
+	city    string
+	state   string
+	country string
+	// location string // Se elimina
+	latCity float32
+	lonCity float32
+	weather string
 	// Se agregan estos dos campos para saber cuando se crea
 	// y cuando se termina de llenar los datos.
 	tcreate time.Time // cuando se crea el dato
@@ -30,6 +35,17 @@ type dataWeb struct {
 type dataBad struct {
 	index int
 	city  string
+}
+
+// Esta estructura es para recuperar la
+// UBICACION DE UNA CIUDAD
+
+type Ubicacion struct {
+	Name    string  `json:"name"`
+	Lat     float32 `json:"lat"`
+	Lon     float32 `json:"lon"`
+	Country string  `json:"country"`
+	State   string  `json:"state"`
 }
 
 //--MAIN---------------------------------------------------------------------------
@@ -56,12 +72,18 @@ func main() {
 	// Estas variables contienen los arreglos con parametros buenos y malos
 	var dataCity []dataWeb // Ciudades con formato OK
 	var badCity []dataBad  // Ciudades con formato no OK
+	var cityEmpty []string // Aqui se almacenan los nombres de las ciudades
+	// para las que no se recupera informacion
 
 	for idx, arg := range args[1:] {
 		// range va desde 0 hasta el tamanio del arreglo
 		if expresionRegular.Match([]byte(arg)) { // Si coincide con la expresion regular es TRUE
+			// Se descompone la ciudad en nombre y pais Quito , EC
+			posComma := strings.Index(arg, ",")
+			nameCity := arg[0:posComma]
+			codCountry := arg[posComma+1:]
 			// 3. Se guardan los parametros ok en un arreglos de ciudades
-			dataCity = append(dataCity, dataWeb{idx + 1, arg, "vacio", "vacio", time.Now(), time.Now()})
+			dataCity = append(dataCity, dataWeb{idx + 1, nameCity, "vacio", codCountry, 0, 0, "vacio", time.Now(), time.Now()})
 		} else {
 			// Se guardan las ciudades con formato incorrecto
 			// en un arreglo de malas ciudades
@@ -88,24 +110,65 @@ func main() {
 		// canal.
 		//for idx, arg := range args[1:] {
 		for i := 0; i <= len(dataCity)-1; i++ {
+			// Se llama a la funcion para procesar Ciudades
+			// Se procesa una ciudad en cada llamada.
+			go proCitysLoc(&dataCity[i])
+			time.Sleep(90 * time.Millisecond)
+		}
+		// originalmente en una sola llamada se hacian
+		// las consultas para obtener ubicacion y clima.
+		//
+		// en la llamada anterior solamente se obtiene
+		// la latitud y la longitud
+		//
+		// en la siguiente llamada se obtiene la longitud y la latitud
+		// de la ciudad
+
+		for i := 0; i <= len(dataCity)-1; i++ {
 			//fmt.Println("Procesando elemento [", i, "]")
-			go proCitys(&dataCity[i], i) // Se llama a la funcion para procesar Ciudades
+			go proCityWeather(&dataCity[i]) // Se llama a la funcion para procesar el clima
 			time.Sleep(80 * time.Millisecond)
 		}
-	}
 
-	// Se imprimen los resultados obtenidos
-	impWeather(dataCity)
+		// De las que no se ha podido recuperar el clima.
+		// Se cuenta las ciudades que no hay recuperado weather
+
+		vacios := 0
+
+		for i := 0; i <= len(dataCity)-1; i++ {
+			if dataCity[i].weather == "vacio" {
+				vacios = vacios + 1
+				cityEmpty = append(cityEmpty, dataCity[i].city)
+			}
+		}
+
+		if vacios > 0 {
+			// Si hay registros sin contenido del clima se vuelven a procesar
+			for i := 0; i <= len(dataCity)-1; i++ {
+				if dataCity[i].weather == "vacio" {
+					// Solamente se vuelven a consultar las vacias
+					go proCityWeather(&dataCity[i]) // Se llama a la funcion para procesar el clima
+					time.Sleep(60 * time.Millisecond)
+				}
+			}
+		}
+
+		// Se imprimen los resultados obtenidos
+		impCityes(dataCity)
+
+	}
 
 	fmt.Println("\n\n FIN DEL PROGRAMA..")
 	fmt.Println("\n\nTiempo transcurrido:", time.Since(now))
 
 }
 
-//--IMPWEATHER---------------------------------------------------------------------------
+//--IMPCITYES---------------------------------------------------------------------------
 //
 //  Imprime en formato los datos recuperados de la web.
-func impWeather(cityes []dataWeb) {
+//  para cada una de las ciudades.
+// Se cambia el nombre de la ciudad para ser mas descriptivo.
+func impCityes(cityes []dataWeb) {
 
 	// Se ordena el Slice por el nombre de la ciudad.
 	sort.Slice(cityes, func(i, j int) bool {
@@ -114,16 +177,18 @@ func impWeather(cityes []dataWeb) {
 
 	for i := 0; i < len(cityes); i++ {
 		fmt.Println("No:", i+1)
-		fmt.Println("Ciudad: ", cityes[i].city)
+		fmt.Println("Ciudad      : ", cityes[i].city)
+		fmt.Println("Estado      : ", cityes[i].state)
+		fmt.Println("Pais        : ", cityes[i].country)
+
+		fmt.Println("Latitud     : ", fmt.Sprintf("%f", cityes[i].latCity))
+		fmt.Println("Longitud    : ", fmt.Sprintf("%f", cityes[i].lonCity))
 		fmt.Println("Tiempo proc.: ", cityes[i].tdone.Sub(cityes[i].tcreate))
-		fmt.Println("Info Geografica: ", cityes[i].location)
-		fmt.Println("Info Clima: ", cityes[i].weather)
+		fmt.Println("Info Clima  : ", cityes[i].weather)
 
-		fmt.Println("-------------")
-
+		fmt.Println("------------------------------------------------")
 	}
-
-}
+} // END: func impCityes(cityes []dataWeb)
 
 //--MENU---------------------------------------------------------------------------
 
@@ -167,162 +232,195 @@ func menu(badCity []dataBad) int {
 }
 
 // --PROCITYS---------------------------------------------------------------------------------------
+//
+// Procesa las ciudades de una en una.
+func proCitysLoc(city *dataWeb) {
 
-func proCitys(city *dataWeb, i int) {
+	// Almacena la ubicacion recuperada de la ciudad
+	// en la llamada a la funcion queryCityLocation
+	var cityLoc Ubicacion
 
-	// Se guarda el momento en que se empieza a procesar.
-
+	// Se guarda el momento en que se empieza a procesar la ciudad.
 	city.tcreate = time.Now()
-	//fmt.Println(i, ": en  proCitys()")
-	// Procesa las ciudades de una en una.
 
-	//fmt.Println("Procesando en proCitys: ", city.index, " - ", city.city)
+	if city.state == "vacio" {
+		var bytes []byte // bytes contiene el texto de la consulta web
+		// El parametro es el nombre de la ciudad en formato ciudad,PA
+		bytes, err := queryCityLocation(city.city, city.country)
+		// manejo de error
+		if err != nil {
+			fmt.Println("Error fatal #1 en proCitys")
+			log.Fatal(err)
+		}
+		// Si la cadena devuelta es [], significa que no se pudo hacer la consulta
+		if len(bytes) < 3 {
+			fmt.Println(fmt.Sprintf("La ciudad: [%s] no existe o el nombre esta mal escrito.", city.city))
+			return // se sale de la funcion ya que no hay contenido
+		}
+		//--APLICANDO UNMARSHAL-------------------------
+		// bytes recupera [] al inicio y final, no se toman en cuenta.
+		objetostring2 := string(bytes)[1 : len(bytes)-1]
+		json.Unmarshal([]byte(objetostring2), &cityLoc)
+		// Luego de aplicar Unmarshal, la variable cityLoc
+		// Contiene una cadena como esta:
+		// {Loja -3.996845 -79.20167 EC Loja}
 
-	var bytes []byte // bytes contiene el texto de la consulta web
-	// El parametro es el nombre de la ciudad en formato ciudad,PA
-	bytes, err := queryCityLocation(city.city)
+		// ** Se elimina todo el manejo de obtencion de valores
+		// ** con expresiones regulares.
+
+		intLat := cityLoc.Lat
+		intLon := cityLoc.Lon
+		// Se almacenan la latitud y la longitud en sus propios campos
+		//city.latCity = string(strLat) //aInt, err := strconv.Atoi(a)
+		city.latCity = intLat
+		city.lonCity = intLon
+		city.state = cityLoc.State
+		city.tdone = time.Now()
+	}
+
+} // FIN: func proCitys(city *dataWeb, i int)
+
+// --QUERYCITYLOCATION-------------------------------------------------------------------------------
+
+func queryCityLocation(city string, country string) ([]byte, error) {
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	// codigo nuevo
+	urlFind := fmt.Sprintf("https://api.openweathermap.org/geo/1.0/direct?q=%s,,%s&limit=1&appid=3582889a6bd6c9bd3d2867e51f420116", city, country)
+	bytes, err := getWebBytes(client, urlFind)
 	// manejo de error
 	if err != nil {
-		fmt.Println("Error fatal #1 en proCitys")
+		fmt.Println("Error fatal en : queryCityLocation()")
+		log.Fatal(err)
+	}
+	return bytes, nil
+} // --FIN QUERYCITYLOCATION-------------------------------------------------------------------------
+
+// --QUERYCITYWEATHER-------------------------------------------------------------------------------
+
+func queryCityWeather(latitud string, longitud string) ([]byte, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	urlFind := fmt.Sprintf("http://api.openweathermap.org/data/2.5/weather?units=metric&lat=%s&lon=%s&appid=3582889a6bd6c9bd3d2867e51f420116", latitud, longitud)
+	bytes, err := getWebBytes(client, urlFind)
+	// manejo de error
+	if err != nil {
+		fmt.Println("Error fatal en : queryCityWeather()")
+		log.Fatal(err)
+	}
+	return bytes, nil
+}
+
+// --PROCCITYWEATHER-------------------------------------------------------------------------
+
+func proCityWeather(city *dataWeb) {
+	// Se obtiene la latitud y longitud de la ciudad
+	latitud := fmt.Sprintf("%f", city.latCity)
+	longitud := fmt.Sprintf("%f", city.lonCity)
+	// Se llama a la funcion para consultar el clima en ese lugar
+	bytes, err := queryCityWeather(latitud, longitud)
+	// manejo de error
+	if err != nil {
+		fmt.Println("Error fatal en : proCityWeather()")
 		log.Fatal(err)
 	}
 	// Si la cadena devuelta es [], significa que no se pudo hacer la consulta
 	if len(bytes) < 3 {
 		fmt.Println(fmt.Sprintf("La ciudad: [%s] no existe o el nombre esta mal escrito.", city.city))
-		city.location = string(bytes) // Se almacena lo recuperado
-		return                        // se sale de la funcion ya que no hay contenido
-	}
-	// Se descompone el nombre en sus dos partes ciudad,PA ciudad y pais.
-	//  Se obtiene las posiciones donde se encuentra (,)
-
-	iniCadena := strings.Index(city.city, ",")
-	// Se obtienen las cadenas de la ciudad y el pais
-	strCity := city.city[:iniCadena]
-	strCountry := city.city[iniCadena+1:]
-	// Buscamos los valores para: name, country, state, lat y lon
-	// para hacer esto utilizamos expresiones regulares
-	// STATE
-	expresion := regexp.MustCompile(`\"state\":\"[a-zA-ZñÑáóúíé]*\"`)
-	// En la expresion regular anterior se añade ñÑ para los nombres que las contienen
-	// Luego se agregan las vocales con tilde
-	datFound := string(expresion.Find(bytes))
-	iniCadena = strings.Index(datFound, ":")
-	strState := datFound[iniCadena+2 : len(datFound)-1]
-	// LAT
-	expresion = regexp.MustCompile(`\"lat\":\-?[0-9]+\.?[0-9]+`)
-	datFound = string(expresion.Find(bytes))
-	iniCadena = strings.Index(datFound, ":")
-	strLat := datFound[iniCadena+1:]
-	// LON
-	expresion = regexp.MustCompile(`\"lon\":\-?[0-9]+\.?[0-9]+`)
-	datFound = string(expresion.Find(bytes))
-	iniCadena = strings.Index(datFound, ":")
-	strLon := datFound[iniCadena+1:]
-
-	txtResultado := fmt.Sprintf("[Ciudad: %s Estado: %s Pais: %s Latitud: %s Longitud: %s]", strCity, strState, strCountry, strLat, strLon)
-
-	city.location = txtResultado // Se introduce el resultado para la locacion
-
-	// Se procede a obtener el tiempo con las coordenadas de
-	// latitud y logitud obtenidas
-	bytes, err = queryCityWeather(strLat, strLon)
-
-	// manejo de error
-	if err != nil {
-		fmt.Println("Error fatal #1 en proCitys")
-		log.Fatal(err)
-	}
-	// Si la cadena devuelta es [], significa que no se pudo hacer la consulta
-	if len(bytes) < 3 {
-		fmt.Println(fmt.Sprintf("La ciudad: [%s] no existe o las coordenadas (Lat:%s, Lon:%s) estan equivocadas.", city.city, strLat, strLon))
-		city.location = string(bytes) // Se almacena lo recuperado
-		return                        // se sale de la funcion ya que no hay contenido
+		fmt.Println(fmt.Sprintf("o la latitud : [%s] no es la correcta.", city.latCity))
+		fmt.Println(fmt.Sprintf("o la longitud: [%s] no es la correcta", city.lonCity))
+		return // se sale de la funcion ya que no hay contenido
 	}
 
-	//fmt.Println(string(bytes))
-	city.weather = paramWeather(bytes)
-	city.tdone = time.Now()
+	city.weather = procWeatherRecovered(bytes)
 
+} //--FIN--PROCCITYWEATHER------------------------------------------------------------------
+
+//--PROCWEATHERRECOVERED--------------------------------------------------------------------
+func procWeatherRecovered(cadena []byte) (wproceced string) {
+
+	// Estructura para almacenar el clima de una ciudad
+
+	// la INFORMACION DEL CLIMA EN UNA CIUDAD
+	type coord struct {
+		Lon float32 `json:"lon"`
+		Lat float32 `json:"lat"`
+	}
+	type weather struct {
+		Id          int
+		Main        string
+		Description string
+		Icon        string
+	}
+	type Mein struct {
+		Temp       float32 `json:"temp"`
+		Feels_like float32 `json:"feels_like"`
+		Temp_min   float32 `json:"temp_min"`
+		Temp_max   float32 `json:"temp_max"`
+		Pressure   int     `json:"pressure"`
+		Humidity   int     `json:"humidity"`
+	}
+
+	type wind struct {
+		Speed float32 `json:"speed"`
+		Deg   int     `json:"deg"`
+	}
+
+	type clouds struct {
+		All int `json:"all"`
+	}
+
+	type sys struct {
+		Type    int    `json:"type"`
+		Id      int16  `json:"id"`
+		Country string `json:"country"`
+		Sunrise int32  `json:"sunrise"`
+		Sunset  int32  `json:"sunset"`
+	}
+
+	type Clima struct {
+		Coord      coord   `json:"coord"`
+		Weather    weather `json:"weather"`
+		Base       string  `json:"base"`
+		Main       Mein    `json:"main"`
+		Visibility int     `json:"visibility"`
+		Wind       wind    `json:"wind"`
+		Clouds     clouds  `json:"clouds"`
+		Dt         int32   `json:"dt"`
+		Sys        sys     `json:"sys"`
+		Timezone   int32   `json:"timezone"`
+		Id         int32   `json:"id"`
+		Name       string  `json:"name"`
+		Cod        int     `json:"cod"`
+	}
+
+	var vClima Clima
+
+	/////////////////////////////////////////////////////////////////////////////
+
+	//--APLICANDO UNMARSHAL-------------------------")
+	// bytes recupera [] al inicio y final, no se toman en cuenta.
+	objetostring := string(cadena) //[1 : len(bytes)-1]
+	json.Unmarshal([]byte(objetostring), &vClima)
+
+	wproceced = fmt.Sprintf("\n\tTemperatura   : %f Grados", vClima.Main.Temp)
+	//wproceced = wproceced + fmt.Sprintf("\n\tSensacion Term: %f", vClima.Main.Feels_like)
+	//wproceced = wproceced + fmt.Sprintf("\n\tTemp Mínima   : %f", vClima.Main.Temp_min)
+	//wproceced = wproceced + fmt.Sprintf("\n\tTemp Máxima   : %f", vClima.Main.Temp_max)
+	wproceced = wproceced + fmt.Sprintf("\n\tPresión Atm.  : %dhPa", vClima.Main.Pressure)
+	wproceced = wproceced + fmt.Sprintf("\n\tHumedad       : %d %%", vClima.Main.Humidity)
+	wproceced = wproceced + fmt.Sprintf("\n\tVisibilidad   : %dmts", vClima.Visibility)
+
+	// city.weather = fmt.Sprintf("\n\tTemperatura   : %f", vClima.Main.Temp)
+
+	// /////////////////////////////////////////////////////////////////////////////
+
+	return wproceced
 }
 
-// --PARAMWEATHER---------------------------------------------------------------------------------------
-func paramWeather(bytes []byte) string {
-	// Del resultado obtenido vamos a obtener los parametros
-	// que se pueden extraer con la misma expresion regular
-	// TEMP
-	expresion := regexp.MustCompile(`\"temp\":\-?[0-9]+\.?[0-9]+`)
-	datFound := string(expresion.Find(bytes))
-	iniCadena := strings.Index(datFound, ":")
-	strTemp := datFound[iniCadena+1:]
-	// TEMP MIN
-	expresion = regexp.MustCompile(`\"temp_min\":\-?[0-9]+\.?[0-9]+`)
-	datFound = string(expresion.Find(bytes))
-	iniCadena = strings.Index(datFound, ":")
-	strTempMin := datFound[iniCadena+1:]
-	// TEMP MAX
-	expresion = regexp.MustCompile(`\"temp_max\":\-?[0-9]+\.?[0-9]+`)
-	datFound = string(expresion.Find(bytes))
-	iniCadena = strings.Index(datFound, ":")
-	strTempMax := datFound[iniCadena+1:]
-	// PRESION
-	expresion = regexp.MustCompile(`\"pressure\":\-?[0-9]+\.?[0-9]+`)
-	datFound = string(expresion.Find(bytes))
-	iniCadena = strings.Index(datFound, ":")
-	strPres := datFound[iniCadena+1:]
-	// HUMEDAD
-	expresion = regexp.MustCompile(`\"humidity\":\-?[0-9]+\.?[0-9]+`)
-	datFound = string(expresion.Find(bytes))
-	iniCadena = strings.Index(datFound, ":")
-	strHum := datFound[iniCadena+1:]
-	// VISIBILIDAD
-	expresion = regexp.MustCompile(`\"visibility\":\-?[0-9]+\.?[0-9]+`)
-	datFound = string(expresion.Find(bytes))
-	iniCadena = strings.Index(datFound, ":")
-	strVisi := datFound[iniCadena+1:]
-	// VIENTO
-	expresion = regexp.MustCompile(`\"speed\":\-?[0-9]+\.?[0-9]+`)
-	datFound = string(expresion.Find(bytes))
-	iniCadena = strings.Index(datFound, ":")
-	strWindSpeed := datFound[iniCadena+1:]
+//--FIN --PROCWEATHERRECOVERED---------------------------------------------------------------
 
-	txtResultado := fmt.Sprintf("[Temperatura: %s Temp Minima: %s Temp Maxima: %s Presion: %s Humedad: %s Visibilidad: %s Vel Viento: %s]", strTemp, strTempMin, strTempMax, strPres, strHum, strVisi, strWindSpeed)
-
-	return txtResultado
-}
-
-// --QUERYCITYLOCATION---------------------------------------------------------------------------------------
-
-func queryCityLocation(city string) ([]byte, error) {
-	//fmt.Println("Entrando a la funcion queryCityLocation()")
-	client := &http.Client{Timeout: 30 * time.Second}
-	// codigo nuevo
-	urlFind := fmt.Sprintf("https://api.openweathermap.org/geo/1.0/direct?q=%s&limit=5&appid=3582889a6bd6c9bd3d2867e51f420116", city)
-	bytes, err := getWebBytes(client, urlFind)
-	// manejo de error
-	if err != nil {
-		fmt.Println("Error fatal en : queryCityWeather()")
-		log.Fatal(err)
-	}
-	return bytes, nil
-}
-
-// --QUERYCITYWEATHER---------------------------------------------------------------------------------------
-
-func queryCityWeather(latCity string, lonCity string) ([]byte, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
-	// codigo nuevo
-	urlFind := fmt.Sprintf("http://api.openweathermap.org/data/2.5/weather?units=metric&lat=%s&lon=%s&appid=3582889a6bd6c9bd3d2867e51f420116", latCity, lonCity)
-
-	bytes, err := getWebBytes(client, urlFind)
-	// manejo de error
-	if err != nil {
-		fmt.Println("Error fatal en : queryCityWeather()")
-		log.Fatal(err)
-	}
-	return bytes, nil
-}
-
-//--GETWEBBYTES---------------------------------------------------------------------------------------
+//--GETWEBBYTES-----------------------------------------------------------------------------
 //
 // Esta funcion obtiene el contenido del sitio web, de acuerdo
 // al URL que se le de como parametro.
