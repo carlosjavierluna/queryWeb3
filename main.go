@@ -214,7 +214,7 @@ func menu(badCity []dataBad) int {
 		fmt.Println("No procesar ninguno de los parametros..")
 		return 0
 	case "1":
-		fmt.Println("Procesando parametros validos...")
+		fmt.Println("Procesando parametros validos...\n------------------------------------------------")
 		return 1
 	case "2":
 		fmt.Println("\nListado de parametros no validos...")
@@ -288,6 +288,7 @@ func queryCityLocation(city string, country string) ([]byte, error) {
 	// codigo nuevo
 	urlFind := fmt.Sprintf("https://api.openweathermap.org/geo/1.0/direct?q=%s,,%s&limit=1&appid=3582889a6bd6c9bd3d2867e51f420116", city, country)
 	bytes, err := getWebBytes(client, urlFind)
+	time.Sleep(50 * time.Millisecond)
 	// manejo de error
 	if err != nil {
 		fmt.Println("Error fatal en : queryCityLocation()")
@@ -300,9 +301,9 @@ func queryCityLocation(city string, country string) ([]byte, error) {
 
 func queryCityWeather(latitud string, longitud string) ([]byte, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
-
 	urlFind := fmt.Sprintf("http://api.openweathermap.org/data/2.5/weather?units=metric&lat=%s&lon=%s&appid=3582889a6bd6c9bd3d2867e51f420116", latitud, longitud)
 	bytes, err := getWebBytes(client, urlFind)
+	time.Sleep(50 * time.Millisecond)
 	// manejo de error
 	if err != nil {
 		fmt.Println("Error fatal en : queryCityWeather()")
@@ -426,6 +427,7 @@ func procWeatherRecovered(cadena []byte) (wproceced string) {
 // al URL que se le de como parametro.
 
 func getWebBytes(client *http.Client, url string) ([]byte, error) {
+	//fmt.Println("URL enviada: \n", url)
 	//fmt.Println("Entrando a la funcion getWebBytes()")
 	// Se verifica si la solicitud se ha construido bien.
 	// Si se tiene un error en la conexion o la consulta se termina el programa
